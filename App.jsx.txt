@@ -1,0 +1,262 @@
+// App.jsx
+import React, { useState, useEffect, useRef } from 'react';
+
+// Firebase modules are now globally available from index.html
+// We'll access them via window.firebaseDb, window.firebaseAuth, etc.
+
+function App() {
+  // State variables for Firebase and user
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState('');
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [username, setUsername] = useState('');
+  const [isUsernameSet, setIsUsernameSet] = useState(false);
+  const [usernameInput, setUsernameInput] = useState(''); // For the input field
+
+  // State variables for pet feeding status
+  const [isFed, setIsFed] = useState(false);
+  const [lastFedBy, setLastFedBy] = useState('Nobody');
+  const [lastFedTime, setLastFedTime] = useState('Never');
+  const [lastResetCSTDate, setLastResetCSTDate] = useState(''); // Stores the date of the last system reset in CST (YYYY-MM-DD)
+
+  // Helper function to get the current date string in CST (YYYY-MM-DD)
+  const getCurrentCSTDateString = () => {
+    const now = new Date();
+    // Get UTC milliseconds
+    const utcMillis = now.getTime() + (now.getTimezoneOffset() * 60 * 1000);
+    // CST is UTC-6 hours
+    const cstMillis = utcMillis - (6 * 60 * 60 * 1000);
+    const cstDate = new Date(cstMillis);
+    return cstDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+  };
+
+  // Firebase Initialization and Authentication
+  useEffect(() => {
+    // Access Firebase instances from the window object after they are loaded by index.html
+    if (window.firebaseDb && window.firebaseAuth) {
+      setDb(window.firebaseDb);
+      setAuth(window.firebaseAuth);
+
+      // Listen for auth state changes
+      const unsubscribe = window.onAuthStateChanged(window.firebaseAuth, async (user) => {
+        if (user) {
+          const currentUserId = user.uid;
+          setUserId(currentUserId);
+          setIsAuthReady(true);
+          console.log("User signed in:", currentUserId);
+
+          // After user is signed in, try to fetch their username
+          // Use window.__app_id which is set in index.html to your Firebase projectId
+          const appId = window.__app_id;
+          const userProfileDocRef = window.doc(window.firebaseDb, `artifacts/${appId}/users/${currentUserId}/profile`, 'userProfile');
+          try {
+            const docSnap = await window.getDoc(userProfileDocRef);
+            if (docSnap.exists() && docSnap.data().username) {
+              setUsername(docSnap.data().username);
+              setIsUsernameSet(true);
+              console.log("Existing username loaded:", docSnap.data().username);
+            } else {
+              setIsUsernameSet(false); // Prompt user to set username
+              console.log("No username found for this user. Prompting to set.");
+            }
+          } catch (e) {
+            console.error("Error fetching user profile:", e);
+            setIsUsernameSet(false); // Assume no username if error
+          }
+
+        } else {
+          console.log("No user signed in yet, waiting for anonymous sign-in from index.html.");
+        }
+      });
+
+      // Cleanup subscription on unmount
+      return () => unsubscribe();
+    }
+  }, []); // Empty dependency array means this runs once on mount
+
+  // Firestore Data Listener (onSnapshot) for pet status and daily reset logic
+  useEffect(() => {
+    if (db && userId && isAuthReady) {
+      const appId = window.__app_id; // Use the projectId as app ID
+      const petStatusDocRef = window.doc(db, `artifacts/${appId}/public/data/petStatus`, 'currentStatus');
+
+      const unsubscribe = window.onSnapshot(petStatusDocRef, async (docSnap) => {
+        let data;
+        if (docSnap.exists()) {
+          data = docSnap.data();
+          setIsFed(data.isFed);
+          setLastFedBy(data.lastFedBy || 'Nobody');
+          setLastFedTime(data.lastFedTime || 'Never');
+          setLastResetCSTDate(data.lastResetCSTDate || '');
+          console.log("Current pet status data:", data);
+        } else {
+          console.log("No pet status document found! Initializing default status.");
+          data = {
+            isFed: false,
+            lastFedBy: 'Nobody',
+            lastFedTime: 'Never',
+            lastResetCSTDate: getCurrentCSTDateString() // Initialize with current CST date
+          };
+          await window.setDoc(petStatusDocRef, data).catch(e => console.error("Error setting initial pet status document:", e));
+          setIsFed(data.isFed);
+          setLastFedBy(data.lastFedBy);
+          setLastFedTime(data.lastFedTime);
+          setLastResetCSTDate(data.lastResetCSTDate);
+        }
+
+        // --- Daily Reset Logic ---
+        const currentCSTDate = getCurrentCSTDateString();
+        if (currentCSTDate > data.lastResetCSTDate) {
+          console.log(`New CST day detected (${currentCSTDate}). Resetting status.`);
+          try {
+            await window.setDoc(petStatusDocRef, {
+              isFed: false,
+              lastFedBy: 'System Reset',
+              lastFedTime: 'Midnight CST',
+              lastResetCSTDate: currentCSTDate
+            }, { merge: true });
+            console.log("Pet status reset to HUNGRY! by System Reset.");
+          } catch (e) {
+            console.error("Error during system reset:", e);
+          }
+        }
+      }, (error) => {
+        console.error("Error listening to pet status document:", error);
+      });
+
+      return () => unsubscribe();
+    }
+  }, [db, userId, isAuthReady]);
+
+  // Function to save username
+  const saveUsername = async () => {
+    if (!db || !userId || !usernameInput.trim()) {
+      console.warn("Firestore not initialized, user not authenticated, or username is empty.");
+      return;
+    }
+
+    const appId = window.__app_id;
+    const userProfileDocRef = window.doc(db, `artifacts/${appId}/users/${userId}/profile`, 'userProfile');
+
+    try {
+      await window.setDoc(userProfileDocRef, { username: usernameInput.trim() });
+      setUsername(usernameInput.trim());
+      setIsUsernameSet(true);
+      console.log("Username saved successfully:", usernameInput.trim());
+    } catch (e) {
+      console.error("Error saving username: ", e);
+    }
+  };
+
+  // Function to update pet feeding status
+  const toggleFedStatus = async () => {
+    if (!db || !userId) {
+      console.warn("Firestore not initialized or user not authenticated yet.");
+      return;
+    }
+    if (!username) {
+      console.warn("Please set your username before updating the status.");
+      return;
+    }
+
+    const appId = window.__app_id;
+    const petStatusDocRef = window.doc(db, `artifacts/${appId}/public/data/petStatus`, 'currentStatus');
+    const newStatus = !isFed;
+    const now = new Date();
+    const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateString = now.toLocaleDateString();
+
+    try {
+      await window.setDoc(petStatusDocRef, {
+        isFed: newStatus,
+        lastFedBy: username,
+        lastFedTime: `${timeString} on ${dateString}`,
+        lastResetCSTDate: getCurrentCSTDateString()
+      }, { merge: true });
+      console.log("Pet status updated successfully by", username);
+    } catch (e) {
+      console.error("Error updating document: ", e);
+    }
+  };
+
+  // Loading state
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+        <div className="text-center text-gray-600 font-inter">
+          Loading app...
+        </div>
+      </div>
+    );
+  }
+
+  // Username input screen
+  if (!isUsernameSet) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-100 to-blue-100 p-4 font-inter">
+        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full text-center border border-gray-200">
+          <h2 className="text-3xl font-bold text-gray-800 mb-6">Set Your Username</h2>
+          <p className="text-gray-600 mb-4">This will be shown when you update the feeding status.</p>
+          <input
+            type="text"
+            value={usernameInput}
+            onChange={(e) => setUsernameInput(e.target.value)}
+            placeholder="Enter your username"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-lg mb-6"
+            maxLength="20"
+          />
+          <button
+            onClick={saveUsername}
+            className="w-full py-3 px-6 rounded-xl bg-purple-600 text-white font-bold text-lg transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg hover:bg-purple-700 focus:outline-none focus:ring-4 focus:ring-purple-500"
+          >
+            Save Username
+          </button>
+          <p className="mt-6 text-sm text-gray-500">
+            Your unique ID: <span className="font-mono break-all">{userId}</span>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Main app screen
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-100 to-blue-100 p-4 font-inter">
+      <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-gray-200">
+        <h1 className="text-4xl font-extrabold text-gray-800 mb-6 tracking-tight">
+          Cat Feeding Tracker
+        </h1>
+
+        <div className="mb-8 p-4 bg-gray-50 rounded-xl border border-gray-200">
+          <p className="text-lg text-gray-600 mb-2">The cats are:</p>
+          <p className={`text-5xl font-bold ${isFed ? 'text-green-600' : 'text-red-600'} mb-4 transition-colors duration-300`}>
+            {isFed ? 'FED!' : 'HUNGRY!'}
+          </p>
+          <p className="text-sm text-gray-500">
+            Last updated by: <span className="font-semibold text-gray-700">{lastFedBy}</span>
+          </p>
+          <p className="text-sm text-gray-500">
+            At: <span className="font-semibold text-gray-700">{lastFedTime}</span>
+          </p>
+        </div>
+
+        <button
+          onClick={toggleFedStatus}
+          className={`w-full py-4 px-6 rounded-xl text-white font-bold text-xl transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg
+            ${isFed
+              ? 'bg-red-500 hover:bg-red-600 focus:ring-red-500'
+              : 'bg-green-500 hover:bg-green-600 focus:ring-green-500'
+            } focus:outline-none focus:ring-4`}
+        >
+          {isFed ? 'Mark as Hungry' : 'Mark as Fed'}
+        </button>
+
+        <p className="mt-8 text-sm text-gray-500">
+          You are: <span className="font-semibold text-gray-700">{username}</span> (ID: <span className="font-mono break-all">{userId}</span>)
+        </p>
+      </div>
+    </div>
+  );
+}
+export default App;

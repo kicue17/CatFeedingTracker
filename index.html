@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cat Feeding Tracker</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font from Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- React Development CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX transformation in browser (for simplicity, not for production) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        // YOUR FIREBASE CONFIGURATION GOES HERE
+        // Replace with the firebaseConfig object you copied from Step 1.4
+        const firebaseConfig = {// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDk9QMbQbAjxiNKZwBQ2Ym8y_ThGfTE5hI",
+  authDomain: "cat-feeding-app-7a1f6.firebaseapp.com",
+  projectId: "cat-feeding-app-7a1f6",
+  storageBucket: "cat-feeding-app-7a1f6.firebasestorage.app",
+  messagingSenderId: "18062121274",
+  appId: "1:18062121274:web:16fe0d76c74cd8e144d803"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Make these available globally for your React app (via Babel)
+        window.firebaseApp = app;
+        window.firebaseDb = db;
+        window.firebaseAuth = auth;
+        window.signInAnonymously = signInAnonymously;
+        window.onAuthStateChanged = onAuthStateChanged;
+        window.doc = doc;
+        window.setDoc = setDoc;
+        window.onSnapshot = onSnapshot;
+        window.getDoc = getDoc;
+
+        // Define __app_id for consistency with the provided React code's data path
+        // This projectId from your firebaseConfig will serve as your unique app ID.
+        window.__app_id = firebaseConfig.projectId;
+
+        // Handle initial authentication
+        onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                try {
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously for the web app.");
+                } catch (error) {
+                    console.error("Error signing in anonymously:", error);
+                }
+            }
+        });
+    </script>
+
+    <!-- Your React App Code -->
+    <script type="text/babel" src="App.jsx"></script>
+    <script type="text/babel">
+        // Render the React app
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
